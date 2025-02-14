@@ -1,68 +1,88 @@
-import { io } from "socket.io-client";
-
 export default {
   data() {
     return {
       peer: null,
-      remoteSrc: null,
+      remoteSrc: new MediaStream(),
+      peerConnection: null,
+      streamReady: false,
     };
   },
   methods: {
-    async setupRTCConnection(localStream, host, remoteStream) {
+    async setupRTCConnection(localStream, host, remoteVideo) {
       const configuration = {
         iceServers: [
-          { urls: "stun:stun.l.google.com:19302" } // Google's primary STUN server [1][7]
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
         ]
       };
 
-      const peerConnection = new RTCPeerConnection(configuration);
+      this.peerConnection = new RTCPeerConnection(configuration);
 
-      peerConnection.ontrack = (event) => { 
-        remoteStream.srcObject = event.streams[0];
+      this.peerConnection.ontrack = (event) => { 
+        this.streamReady = true;
+        console.log("remotevideo", remoteVideo);
+        // remoteVideo.srcObject = event.streams[0];
+        event.streams[0].getTracks().forEach(track => {
+          console.log("adding track", track);
+          this.remoteSrc.addTrack(track);
+        });
       };
 
-      peerConnection.onicecandidate = (event) => {
-        this.$socket.emit("candidate", event.candidate);
+      this.peerConnection.onicecandidate = (event) => {
+        this.$socket.emit("candidate", event.candidate, this.meetingId);
       };
 
       localStream.getTracks().forEach(track => {
-        peerConnection.addTrack(track, localStream);
+        this.peerConnection.addTrack(track, localStream);
       });
 
       this.$socket.on('user-connected', async (userId) => {
         this.peer = userId;
 
         if (host) {
-          const offer = await peerConnection.createOffer();
-          await peerConnection.setLocalDescription(offer);
-
-          let offerToSend =  {
-            id: userId,
-            description: peerConnection.localDescription 
-          };
-          this.$socket.emit('offer', offerToSend);
+          await this.sendOffer();
         }
       });
 
-      this.$socket.on('offer', async (description, userId) => {
-        this.peer = userId;
-        peerConnection.setRemoteDescription(description);
-        let answer = await peerConnection.createAnswer();
-        peerConnection.setLocalDescription(answer);
-        this.$socket.emit('answer', { id: this.peer, description: answer });
-      });
+      this.$socket.on('offer', this.handleOffer);
 
       this.$socket.on("answer", (description) => {
-        peerConnection.setRemoteDescription(description);
+        this.peerConnection.setRemoteDescription(description);
       });
 
       this.$socket.on('candidate', (data) => {
-        peerConnection.addIceCandidate(data);
+        this.peerConnection.addIceCandidate(data);
       });
    
       this.$socket.on('connect', () => {
-        this.$socket.emit("join", this.$socket.id);
+        console.log("connected, joining meeting", this.meetingId);
+        this.$socket.emit("join", this.meetingId);
       });
+    },
+    async handleOffer(description) {
+      if (this.host) { return; }
+      console.log("handleOffer");
+      this.peerConnection.setRemoteDescription(description);
+      let answer = await this.peerConnection.createAnswer();
+      this.peerConnection.setLocalDescription(answer);
+      this.$socket.emit('answer', { id: this.meetingId, description: answer });
+    },
+    async sendOffer() {
+      console.log("creating call");
+      const offer = await this.peerConnection.createOffer();
+      await this.peerConnection.setLocalDescription(offer);
+
+      let offerToSend =  {
+        id: this.meetingId,
+        description: offer 
+      };
+      console.log("sending offer", offerToSend);
+      this.$socket.emit('offer', offerToSend);
+    }
+  },
+  computed: {
+    meetingId() {
+      return this.$route.params.id;
     }
   },
 }

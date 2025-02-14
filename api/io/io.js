@@ -2,30 +2,30 @@ import wrtc from '@roamhq/wrtc';
 
 let users = {};
 export function setupConnection(io) { 
+  console.log("setup");
   io.on('connection', (socket) => {
-    socket.on('join', (userId) => {
-      socket.broadcast.emit('user-connected', userId);
+    console.log('connected');
+    socket.on('join', (meetingId) => {
+      socket.join(meetingId);
+      console.log("socket", socket.id, "joined", meetingId);
+      socket.broadcast.emit('user-connected', meetingId);
     });
 
-    socket.on('offer', ({ id, description }) => {
-      users[socket.id] = id;
-      socket.to(id).emit('offer', description, socket.id);
+    socket.on('offer', ({ id: meetingId, description }) => {
+      console.log('offer seting for meeting', meetingId);
+      socket.to(meetingId).emit('offer', description);
     });
 
-    socket.on('answer', ({ id, description }) => {
-      users[socket.id] = id;
-      socket.to(id).emit('answer', description);
+    socket.on('answer', ({ id: meetingId, description }) => {
+      console.log("answer sent for meeting", meetingId);
+      socket.to(meetingId).emit('answer', description);
     });
 
-    socket.on('candidate', (signal) => {
-      const user = users[socket.id];
-      if (user) {
-        socket.to(user).emit('candidate', signal);
-      }
+    socket.on('candidate', (signal, meetingId) => {
+      socket.to(meetingId).emit('candidate', signal);
     });
 
     socket.on('disconnect', () => {
-      delete users[socket.id];
     });
   }); 
 }
